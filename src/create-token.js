@@ -172,15 +172,39 @@ async function createToken({ name, symbol, uri, decimals, supply, disableMintAut
     }
 }
 
+async function checkAndCreateWallet(rpcUrl) {
+    const walletPath = path.join(process.cwd(), 'wallet.json');
+    const connection = new Connection(rpcUrl, 'confirmed');
+
+    if (!fs.existsSync(walletPath)) {
+        console.log('Creating new wallet.json file...');
+        const keypair = Keypair.generate();
+        const walletData = {
+            publicKey: keypair.publicKey.toBase58(),
+            secretKey: Array.from(keypair.secretKey)
+        };
+        fs.writeFileSync(walletPath, JSON.stringify(walletData, null, 2));
+        console.log('✅ New wallet created and saved to wallet.json');
+        console.log(`Public Key: ${walletData.publicKey}`);
+        console.log('Please fund this wallet with SOL before proceeding.\n');
+        return keypair;
+    } else {
+        console.log('✅ Using existing wallet.json');
+        const walletData = JSON.parse(fs.readFileSync(walletPath, 'utf8'));
+        const keypair = Keypair.fromSecretKey(new Uint8Array(walletData.secretKey));
+        return keypair;
+    }
+}
+
+async function checkWalletBalance(connection, publicKey) {
+    const balance = await connection.getBalance(new PublicKey(publicKey));
+    const solBalance = balance / 1e9; // Convert lamports to SOL
+    return solBalance;
+}
+
 async function stepper() {
     console.log('Welcome to the Solana Token CLI! 🚀');
     console.log('Follow the steps to create your fungible token.\n');
-
-    // Validate environment variables
-    if (!process.env.SOLANA_WALLET_SECRET) {
-        console.error('❌ Error: Missing SOLANA_WALLET_SECRET environment variable. Please create a .env file with SOLANA_WALLET_SECRET.');
-        process.exit(1);
-    }
 
     const rpcOptions = [
         { name: 'Devnet (https://api.devnet.solana.com)', value: 'https://api.devnet.solana.com' },
@@ -209,6 +233,33 @@ async function stepper() {
     ]);
 
     const rpcUrl = rpcChoice === 'custom' ? customRpcUrl : rpcChoice;
+    const connection = new Connection(rpcUrl, 'confirmed');
+
+    // Check and create wallet if needed
+    const keypair = await checkAndCreateWallet(rpcUrl);
+    const publicKey = keypair.publicKey.toBase58();
+
+    // Check wallet balance
+    const balance = await checkWalletBalance(connection, publicKey);
+    console.log(`\nCurrent wallet balance: ${balance} SOL`);
+
+    if (balance < 0.1) {
+        console.log('\n⚠️ Warning: Your wallet balance is low!');
+        console.log('Please send at least 0.1 SOL to this address:');
+        console.log(publicKey);
+        console.log('\nPress Enter to continue once you have funded the wallet...');
+        await inquirer.prompt([{ type: 'input', name: 'continue', message: '' }]);
+
+        // Recheck balance
+        const newBalance = await checkWalletBalance(connection, publicKey);
+        if (newBalance < 0.1) {
+            console.error('❌ Insufficient balance. Please fund your wallet and try again.');
+            process.exit(1);
+        }
+    }
+
+    // Set the wallet as the environment variable for token creation
+    process.env.SOLANA_WALLET_SECRET = JSON.stringify(Array.from(keypair.secretKey));
 
     const answers = await inquirer.prompt([
         {
