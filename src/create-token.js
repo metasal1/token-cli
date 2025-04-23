@@ -179,19 +179,16 @@ async function checkAndCreateWallet(rpcUrl) {
     if (!fs.existsSync(walletPath)) {
         console.log('Creating new wallet.json file...');
         const keypair = Keypair.generate();
-        const walletData = {
-            publicKey: keypair.publicKey.toBase58(),
-            secretKey: Array.from(keypair.secretKey)
-        };
-        fs.writeFileSync(walletPath, JSON.stringify(walletData, null, 2));
+        // Store just the secret key as a buffer
+        fs.writeFileSync(walletPath, JSON.stringify(Array.from(keypair.secretKey)));
         console.log('✅ New wallet created and saved to wallet.json');
-        console.log(`Public Key: ${walletData.publicKey}`);
+        console.log(`Public Key: ${keypair.publicKey.toBase58()}`);
         console.log('Please fund this wallet with SOL before proceeding.\n');
         return keypair;
     } else {
         console.log('✅ Using existing wallet.json');
-        const walletData = JSON.parse(fs.readFileSync(walletPath, 'utf8'));
-        const keypair = Keypair.fromSecretKey(new Uint8Array(walletData.secretKey));
+        const secretKey = new Uint8Array(JSON.parse(fs.readFileSync(walletPath, 'utf8')));
+        const keypair = Keypair.fromSecretKey(secretKey);
         return keypair;
     }
 }
